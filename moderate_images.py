@@ -107,7 +107,7 @@ def moderate_image_batch(image_paths):
 4.  **텍스트/로고/배지 (Text/Logos/Badges):**
     *   **상품형 광고:** 이미지 전체의 1/9 면적 이내 텍스트 허용 (상품명, 자체제작 로고, 감성적 문구 등). 가격/혜택 정보는 허용되나 과도한 홍보/후킹 문구, 두꺼운 서체로 이미지를 가리는 것 불가.
     *   **배너형 광고:** 이미지 내 텍스트, 일러스트, 특수효과 삽입 불가.
-    *   **공통 불가:** 타 브랜드 로고/이름 무단 사용, 스포츠팀 로고/구단명 무단 사용.
+    *   **공통 불가:** 잘 알려지지 않은 브랜드 로고는 해당 상품의 로고일 가능성이 있으므로 무시, 유명 스포츠팀 로고/구단명, 브랜드 로고 무단 사용은 금지.
 
 5.  **지적재산권 및 초상권 (IP & Portrait Rights):**
     *   **가능:** 직접 촬영/제작했거나 정당한 라이선스를 확보한 이미지.
@@ -149,7 +149,7 @@ def moderate_image_batch(image_paths):
     batch_results = []
     try:
         # Using gemini-pro-vision as it's suited for image analysis
-        model = genai.GenerativeModel('gemini-2.0-flash') 
+        model = genai.GenerativeModel('gemini-2.0-flash', generation_config={"temperature": 0.1}) 
         response = model.generate_content(content, stream=False)
 
         try:
