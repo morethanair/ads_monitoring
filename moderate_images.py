@@ -47,16 +47,28 @@ def parse_batch_result(batch_result_text, filenames_in_batch):
     # Match parsed results back to the original filenames in the batch order
     for filename in filenames_in_batch:
         if filename in parsed_results:
-            results.append({'filename': filename, 'result_text': parsed_results[filename]})
+            result_text = parsed_results[filename]
+            
+            # 신뢰도 추출 (예: "신뢰도: 85%")
+            confidence = "N/A"
+            confidence_match = re.search(r'신뢰도:\s*(\d+)%', result_text)
+            if confidence_match:
+                confidence = confidence_match.group(1) + "%"
+            
+            results.append({'filename': filename, 'result_text': result_text, 'confidence': confidence})
         else:
             # Handle cases where a filename might not be found in the response
             # This could happen if the model failed to follow instructions for a specific image
-            results.append({'filename': filename, 'result_text': '오류: 모델 응답에서 해당 파일의 결과를 찾을 수 없습니다.'})
+            results.append({
+                'filename': filename, 
+                'result_text': '오류: 모델 응답에서 해당 파일의 결과를 찾을 수 없습니다.',
+                'confidence': 'N/A'
+            })
             
     # If parsing failed completely (no matches), return a generic error for all files
     if not results and filenames_in_batch:
         error_text = f"오류: 모델 응답 파싱 실패. 전체 응답:\n{batch_result_text}"
-        results = [{'filename': fn, 'result_text': error_text} for fn in filenames_in_batch]
+        results = [{'filename': fn, 'result_text': error_text, 'confidence': 'N/A'} for fn in filenames_in_batch]
 
     return results
 
@@ -74,6 +86,7 @@ def moderate_image_batch(image_paths):
 당신은 주어진 여러 이미지가 광고 소재로 사용 가능한지 판단하는 전문가입니다. 
 아래 나열될 각 이미지에 대해 다음 기준에 따라 평가하고, 각 이미지별로 '사용 가능' 또는 '사용 불가' 판정을 내린 후 그 이유를 명확히 설명해주세요.
 **각 이미지의 분석 결과 시작 부분에 반드시 "--- 이미지: [파일명] ---" 형식으로 파일명을 명시해주세요.**
+**그리고 각 판단에 대한 신뢰도(Confidence) 레벨을 0~100% 사이의 숫자로 반드시 표시해 주세요. 예: "신뢰도: 85%"**
 
 **이미지 사용 가능 여부 판단 기준:**
 
@@ -130,7 +143,7 @@ def moderate_image_batch(image_paths):
     if not valid_images_in_batch:
         print("--- 배치 검수 중단: 유효한 이미지가 없습니다. ---")
         # Return empty list or specific error structure if needed
-        return [{'filename': fn, 'result_text': '오류: 이미지 로드 실패'} for fn in [os.path.basename(p) for p in image_paths]]
+        return [{'filename': fn, 'result_text': '오류: 이미지 로드 실패', 'confidence': 'N/A'} for fn in [os.path.basename(p) for p in image_paths]]
 
     # Call Gemini API using GenerativeModel
     batch_results = []
@@ -149,16 +162,17 @@ def moderate_image_batch(image_paths):
              # Handle potential safety blocks 
              error_text = f"콘텐츠 안전 문제로 응답이 차단되었을 수 있습니다. Gemini 안전 설정을 확인하세요. Full Response: {response.prompt_feedback}"
              print(error_text)
-             batch_results = [{'filename': fn, 'result_text': error_text} for fn in filenames_in_batch]
+             batch_results = [{'filename': fn, 'result_text': error_text, 'confidence': 'N/A'} for fn in filenames_in_batch]
         except Exception as e: # Catch parsing errors
             error_text = f"모델 응답 파싱 중 오류 발생: {e}\n원본 응답: {response.text if hasattr(response, 'text') else 'N/A'}"
             print(error_text)
-            batch_results = [{'filename': fn, 'result_text': error_text} for fn in filenames_in_batch]
+            batch_results = [{'filename': fn, 'result_text': error_text, 'confidence': 'N/A'} for fn in filenames_in_batch]
         
         # Print individual parsed results to console
         print("--- 개별 결과 (콘솔) ---")
         for res in batch_results:
             print(f"파일: {res['filename']}")
+            print(f"신뢰도: {res.get('confidence', 'N/A')}")
             print(f"결과:\n{res['result_text']}")
             print("---")
         print(f"--- 배치 검수 완료 ({len(batch_results)}/{len(image_paths)} 결과 처리) ---\n")
@@ -169,7 +183,7 @@ def moderate_image_batch(image_paths):
         print(error_text)
         print(f"--- 배치 검수 실패 ---\n")
         # Return error results for all images in the batch
-        batch_results = [{'filename': fn, 'result_text': error_text} for fn in filenames_in_batch]
+        batch_results = [{'filename': fn, 'result_text': error_text, 'confidence': 'N/A'} for fn in filenames_in_batch]
         
     # Add full filepath back for HTML report linking
     final_results = []
@@ -225,6 +239,14 @@ def generate_html_report(results, output_dir, image_source_dir_rel):
         .status-possible { color: green; font-weight: bold; }
         .status-impossible { color: red; font-weight: bold; }
         .status-error { color: orange; font-weight: bold; }
+        .confidence-pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background-color: #f0f0f0;
+            font-size: 0.85em;
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body>
@@ -235,6 +257,7 @@ def generate_html_report(results, output_dir, image_source_dir_rel):
         filepath = item['filepath']
         filename = item['filename']
         result_text = item['result_text']
+        confidence = item.get('confidence', 'N/A')
         
         # Determine status for styling (simple check)
         status_class = "status-error" # Default to error/unknown
@@ -253,7 +276,7 @@ def generate_html_report(results, output_dir, image_source_dir_rel):
     <div class="result-item">
         <img src="{img_src}" alt="{filename}" title="{filepath}">
         <div class="result-text">
-            <h3>{filename} (<span class="{status_class}">{status_class.split('-')[1].upper()}</span>)</h3>
+            <h3>{filename} (<span class="{status_class}">{status_class.split('-')[1].upper()}</span>) <span class="confidence-pill">신뢰도: {confidence}</span></h3>
             <pre>{result_text}</pre>
         </div>
     </div>
